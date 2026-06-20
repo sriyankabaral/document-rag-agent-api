@@ -79,3 +79,28 @@ First upload a document, then call `POST /documents/search` from Swagger. For
 example, search for `What projects are mentioned in this document?`. This
 endpoint only retrieves relevant chunks; it does not generate a final LLM
 answer yet.
+
+## Test RAG Agent
+
+`POST /agent/query` generates an answer using relevant Qdrant chunks and a
+local Ollama model. Install Ollama, make sure it is running, and download the
+model:
+
+```powershell
+ollama pull llama3.2
+```
+
+Use `ollama list` to check which models are available, and make sure
+`llm_model` matches one of them. You can configure the local URL and default
+model in a root `.env` file based on `.env.example`.
+
+Example request body:
+
+```json
+{
+  "query": "What AI projects are mentioned in the document?",
+  "top_k": 5,
+  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "llm_model": "llama3.2"
+}
+```
