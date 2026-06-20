@@ -72,3 +72,10 @@ are stored in Qdrant. Qdrant must be running before testing the upload API:
 ```powershell
 docker compose up -d
 ```
+
+## Test Document Search
+
+First upload a document, then call `POST /documents/search` from Swagger. For
+example, search for `What projects are mentioned in this document?`. This
+endpoint only retrieves relevant chunks; it does not generate a final LLM
+answer yet.

@@ -11,6 +11,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -22,6 +23,7 @@ from app.services.embedding_service import (
 )
 from app.services.qdrant_service import (
     COLLECTION_NAME,
+    search_similar_chunks,
     store_chunks_in_qdrant,
 )
 from app.services.text_extractor import extract_text_from_file
@@ -31,6 +33,12 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 
 UPLOAD_DIRECTORY = Path("uploads")
 ALLOWED_FILE_TYPES = {".pdf", ".txt"}
+
+
+class DocumentSearchRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 @router.post("/upload")
@@ -190,4 +198,68 @@ def upload_document(
         "sample_qdrant_point_ids": qdrant_point_ids[:3],
         "document_id": document_metadata.id,
         "metadata_saved": True,
+    }
+
+
+@router.post("/search")
+def search_documents(request: DocumentSearchRequest):
+    query = request.query.strip()
+
+    if not query:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Query cannot be empty.",
+        )
+
+    if not 1 <= request.top_k <= 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="top_k must be between 1 and 10.",
+        )
+
+    try:
+        query_embedding = generate_embeddings(
+            [query],
+            request.embedding_model,
+        )[0]
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate the query embedding.",
+        ) from exc
+
+    try:
+        qdrant_results = search_similar_chunks(
+            query_embedding=query_embedding,
+            top_k=request.top_k,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+    results = [
+        {
+            "score": result["score"],
+            "original_filename": result["original_filename"],
+            "chunk_index": result["chunk_index"],
+            "chunk_text": result["chunk_text"],
+            "chunking_method": result["chunking_method"],
+            "embedding_model": result["embedding_model"],
+        }
+        for result in qdrant_results
+    ]
+
+    return {
+        "query": query,
+        "embedding_model": request.embedding_model,
+        "top_k": request.top_k,
+        "results_count": len(results),
+        "results": results,
     }

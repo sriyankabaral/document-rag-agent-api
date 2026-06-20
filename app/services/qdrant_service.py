@@ -71,3 +71,49 @@ def store_chunks_in_qdrant(
     )
 
     return point_ids
+
+
+def search_similar_chunks(
+    query_embedding: list[float],
+    collection_name: str = COLLECTION_NAME,
+    top_k: int = 5,
+) -> list[dict]:
+    if not query_embedding:
+        raise ValueError("Query embedding cannot be empty.")
+
+    try:
+        if not qdrant_client.collection_exists(collection_name):
+            raise ValueError(
+                f"Qdrant collection '{collection_name}' does not exist."
+            )
+
+        response = qdrant_client.query_points(
+            collection_name=collection_name,
+            query=query_embedding,
+            limit=top_k,
+            with_payload=True,
+        )
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(
+            "Failed to search Qdrant. Make sure Qdrant is running."
+        ) from exc
+
+    results = []
+    for point in response.points:
+        payload = point.payload or {}
+        results.append(
+            {
+                "score": float(point.score),
+                "original_filename": payload.get("original_filename"),
+                "saved_filename": payload.get("saved_filename"),
+                "file_type": payload.get("file_type"),
+                "chunk_index": payload.get("chunk_index"),
+                "chunk_text": payload.get("chunk_text"),
+                "chunking_method": payload.get("chunking_method"),
+                "embedding_model": payload.get("embedding_model"),
+            }
+        )
+
+    return results
