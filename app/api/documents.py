@@ -2,8 +2,19 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
+)
+from sqlalchemy.orm import Session
 
+from app.db.database import get_db
+from app.db.models import DocumentMetadata
 from app.services.chunker import chunk_text
 from app.services.embedding_service import (
     generate_embeddings,
@@ -29,6 +40,7 @@ def upload_document(
     embedding_model: str = Form(
         "sentence-transformers/all-MiniLM-L6-v2"
     ),
+    db: Session = Depends(get_db),
 ):
     try:
         original_filename = Path((file.filename or "").replace("\\", "/")).name
@@ -138,6 +150,26 @@ def upload_document(
             ),
         ) from exc
 
+    document_metadata = DocumentMetadata(
+        file_name=original_filename,
+        file_type=file_type,
+        chunking_method=chunking_method,
+        embedding_model=embedding_model,
+        number_of_chunks=len(chunks),
+        qdrant_collection_name=COLLECTION_NAME,
+    )
+
+    try:
+        db.add(document_metadata)
+        db.commit()
+        db.refresh(document_metadata)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Document was processed, but metadata could not be saved.",
+        ) from exc
+
     return {
         "message": "File uploaded successfully",
         "original_filename": original_filename,
@@ -156,4 +188,6 @@ def upload_document(
         "qdrant_collection_name": COLLECTION_NAME,
         "stored_vectors_count": len(qdrant_point_ids),
         "sample_qdrant_point_ids": qdrant_point_ids[:3],
+        "document_id": document_metadata.id,
+        "metadata_saved": True,
     }

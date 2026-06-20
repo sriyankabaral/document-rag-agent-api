@@ -51,8 +51,9 @@ docker compose down
 
 ## SQLite Database
 
-SQLite stores document metadata and interview bookings. The `app.db` database
-file is created automatically when the FastAPI app starts.
+SQLite stores document-level metadata and interview bookings. The `app.db`
+database file is created automatically when the FastAPI app starts and is
+ignored by Git.
 
 ## Test Document Upload
 
