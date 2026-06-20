@@ -48,3 +48,8 @@ Stop and remove the containers:
 ```powershell
 docker compose down
 ```
+
+## SQLite Database
+
+SQLite stores document metadata and interview bookings. The `app.db` database
+file is created automatically when the FastAPI app starts.
