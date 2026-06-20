@@ -65,4 +65,9 @@ chunking. Choose the `chunking_method` field in Swagger when testing
 `POST /documents/upload`. The API then generates embeddings for every chunk
 using `sentence-transformers/all-MiniLM-L6-v2` or
 `BAAI/bge-small-en-v1.5`. The first request may take longer because the
-selected embedding model must be downloaded.
+selected embedding model must be downloaded. Uploaded chunks and embeddings
+are stored in Qdrant. Qdrant must be running before testing the upload API:
+
+```powershell
+docker compose up -d
+```

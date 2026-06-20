@@ -9,6 +9,10 @@ from app.services.embedding_service import (
     generate_embeddings,
     get_embedding_dimension,
 )
+from app.services.qdrant_service import (
+    COLLECTION_NAME,
+    store_chunks_in_qdrant,
+)
 from app.services.text_extractor import extract_text_from_file
 
 
@@ -114,6 +118,26 @@ def upload_document(
         round(float(value), 4) for value in embeddings[0][:5]
     ]
 
+    try:
+        qdrant_point_ids = store_chunks_in_qdrant(
+            chunks=chunks,
+            embeddings=embeddings,
+            original_filename=original_filename,
+            saved_filename=saved_filename,
+            file_type=file_type,
+            chunking_method=chunking_method,
+            embedding_model=embedding_model,
+        )
+    except Exception as exc:
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "Failed to store document chunks in Qdrant. "
+                "Make sure Qdrant is running."
+            ),
+        ) from exc
+
     return {
         "message": "File uploaded successfully",
         "original_filename": original_filename,
@@ -129,4 +153,7 @@ def upload_document(
         "embedding_dimension": embedding_dimension,
         "number_of_embeddings": len(embeddings),
         "sample_embedding": sample_embedding,
+        "qdrant_collection_name": COLLECTION_NAME,
+        "stored_vectors_count": len(qdrant_point_ids),
+        "sample_qdrant_point_ids": qdrant_point_ids[:3],
     }
