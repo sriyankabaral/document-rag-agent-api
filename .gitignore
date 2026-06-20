@@ -38,3 +38,7 @@ Thumbs.db
 
 # Local database
 app.db
+
+# Uploaded files
+uploads/*
+!uploads/.gitkeep

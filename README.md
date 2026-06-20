@@ -53,3 +53,9 @@ docker compose down
 
 SQLite stores document metadata and interview bookings. The `app.db` database
 file is created automatically when the FastAPI app starts.
+
+## Test Document Upload
+
+Run the server and open http://127.0.0.1:8000/docs in your browser. In the
+Swagger docs, open `POST /documents/upload`, select a `.pdf` or `.txt` file,
+and execute the request.
