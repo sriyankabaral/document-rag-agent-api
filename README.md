@@ -58,4 +58,6 @@ file is created automatically when the FastAPI app starts.
 
 Run the server and open http://127.0.0.1:8000/docs in your browser. In the
 Swagger docs, open `POST /documents/upload`, select a `.pdf` or `.txt` file,
-and execute the request.
+and execute the request. The API extracts text from PDF and TXT files after
+upload. Scanned image-based PDFs may not produce text because OCR is not
+included.

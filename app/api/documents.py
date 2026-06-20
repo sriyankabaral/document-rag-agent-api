@@ -4,6 +4,8 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
+from app.services.text_extractor import extract_text_from_file
+
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
@@ -33,10 +35,32 @@ def upload_document(file: UploadFile = File(...)):
     finally:
         file.file.close()
 
+    try:
+        extracted_text = extract_text_from_file(str(saved_path), file_type)
+    except ValueError as exc:
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    if not extracted_text.strip():
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No readable text found in the uploaded file.",
+        )
+
+    text_preview = (
+        extracted_text.replace("\r", " ").replace("\n", " ")[:300]
+    )
+
     return {
         "message": "File uploaded successfully",
         "original_filename": original_filename,
         "saved_filename": saved_filename,
         "saved_path": saved_path.as_posix(),
         "file_type": file_type,
+        "text_length": len(extracted_text),
+        "text_preview": text_preview,
     }
