@@ -4,3 +4,4 @@ python-dotenv
 sqlalchemy
 python-multipart
 pypdf
+langchain-text-splitters

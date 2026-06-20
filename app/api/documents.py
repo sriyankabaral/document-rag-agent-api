@@ -2,8 +2,9 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
+from app.services.chunker import chunk_text
 from app.services.text_extractor import extract_text_from_file
 
 
@@ -14,7 +15,10 @@ ALLOWED_FILE_TYPES = {".pdf", ".txt"}
 
 
 @router.post("/upload")
-def upload_document(file: UploadFile = File(...)):
+def upload_document(
+    file: UploadFile = File(...),
+    chunking_method: str = Form("recursive"),
+):
     try:
         original_filename = Path((file.filename or "").replace("\\", "/")).name
         file_type = Path(original_filename).suffix.lower()
@@ -55,6 +59,27 @@ def upload_document(file: UploadFile = File(...)):
         extracted_text.replace("\r", " ").replace("\n", " ")[:300]
     )
 
+    try:
+        chunks = chunk_text(extracted_text, method=chunking_method)
+    except ValueError as exc:
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    if not chunks:
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Text was extracted, but no chunks could be created.",
+        )
+
+    sample_chunks = [
+        chunk.replace("\r", " ").replace("\n", " ")[:300]
+        for chunk in chunks[:3]
+    ]
+
     return {
         "message": "File uploaded successfully",
         "original_filename": original_filename,
@@ -63,4 +88,7 @@ def upload_document(file: UploadFile = File(...)):
         "file_type": file_type,
         "text_length": len(extracted_text),
         "text_preview": text_preview,
+        "chunking_method": chunking_method,
+        "number_of_chunks": len(chunks),
+        "sample_chunks": sample_chunks,
     }
