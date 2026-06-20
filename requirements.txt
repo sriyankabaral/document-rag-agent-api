@@ -5,3 +5,4 @@ sqlalchemy
 python-multipart
 pypdf
 langchain-text-splitters
+sentence-transformers

@@ -5,6 +5,10 @@ from uuid import uuid4
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.services.chunker import chunk_text
+from app.services.embedding_service import (
+    generate_embeddings,
+    get_embedding_dimension,
+)
 from app.services.text_extractor import extract_text_from_file
 
 
@@ -18,6 +22,9 @@ ALLOWED_FILE_TYPES = {".pdf", ".txt"}
 def upload_document(
     file: UploadFile = File(...),
     chunking_method: str = Form("recursive"),
+    embedding_model: str = Form(
+        "sentence-transformers/all-MiniLM-L6-v2"
+    ),
 ):
     try:
         original_filename = Path((file.filename or "").replace("\\", "/")).name
@@ -80,6 +87,33 @@ def upload_document(
         for chunk in chunks[:3]
     ]
 
+    try:
+        embeddings = generate_embeddings(chunks, embedding_model)
+        embedding_dimension = get_embedding_dimension(embedding_model)
+    except ValueError as exc:
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate embeddings. Please try again.",
+        ) from exc
+
+    if len(embeddings) != len(chunks):
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Embedding generation did not return one vector per chunk.",
+        )
+
+    sample_embedding = [
+        round(float(value), 4) for value in embeddings[0][:5]
+    ]
+
     return {
         "message": "File uploaded successfully",
         "original_filename": original_filename,
@@ -91,4 +125,8 @@ def upload_document(
         "chunking_method": chunking_method,
         "number_of_chunks": len(chunks),
         "sample_chunks": sample_chunks,
+        "embedding_model": embedding_model,
+        "embedding_dimension": embedding_dimension,
+        "number_of_embeddings": len(embeddings),
+        "sample_embedding": sample_embedding,
     }

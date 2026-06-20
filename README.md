@@ -62,4 +62,7 @@ and execute the request. The API extracts text from PDF and TXT files after
 upload. Scanned image-based PDFs may not produce text because OCR is not
 included. The upload API also supports `recursive` and `sentence` text
 chunking. Choose the `chunking_method` field in Swagger when testing
-`POST /documents/upload`.
+`POST /documents/upload`. The API then generates embeddings for every chunk
+using `sentence-transformers/all-MiniLM-L6-v2` or
+`BAAI/bge-small-en-v1.5`. The first request may take longer because the
+selected embedding model must be downloaded.
