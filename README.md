@@ -82,9 +82,10 @@ answer yet.
 
 ## Test RAG Agent
 
-`POST /agent/query` generates an answer using relevant Qdrant chunks and a
-local Ollama model. Install Ollama, make sure it is running, and download the
-model:
+`POST /agent/query` uses a LangGraph agent with document-retrieval and
+interview-booking tools. Redis stores temporary conversation turns by
+`session_id`; SQLite remains the permanent store for metadata and bookings.
+Install Ollama, make sure it is running, and download the model:
 
 ```powershell
 ollama pull llama3.2
@@ -94,13 +95,77 @@ Use `ollama list` to check which models are available, and make sure
 `llm_model` matches one of them. You can configure the local URL and default
 model in a root `.env` file based on `.env.example`.
 
-Example request body:
+Start Redis with Docker Compose:
+
+```powershell
+docker compose up -d redis
+```
+
+Example document question:
 
 ```json
 {
   "query": "What AI projects are mentioned in the document?",
+  "session_id": "candidate-123",
   "top_k": 5,
   "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
   "llm_model": "llama3.2"
 }
 ```
+
+Example booking conversation using the same `session_id`:
+
+```json
+{
+  "query": "Book an interview for Test Candidate, candidate@example.com, on 2026-06-25 at 14:30.",
+  "session_id": "candidate-123"
+}
+```
+
+For agent bookings, candidate notification is controlled in `app/config.py`:
+
+```python
+AGENT_NOTIFY_CANDIDATE_BY_DEFAULT = False
+```
+
+Set it to `True` to email both the admin and candidate. When it is `False`,
+only the admin address from `SMTP_TO_EMAIL` is notified. The agent never asks
+the user for this preference.
+
+Inspect stored conversation turns:
+
+```powershell
+docker exec document_rag_redis redis-cli LRANGE agent:conversation:candidate-123 0 -1
+```
+
+## Book an Interview
+
+`POST /book-interview` stores each booking permanently in `app.db`, then
+sends an admin notification through SMTP. Set `notify_candidate` to `true`
+to also send confirmation to the candidate.
+
+Configure these values in the root `.env` file:
+
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_EMAIL=your_sender_email@example.com
+SMTP_PASSWORD=your_email_app_password
+SMTP_TO_EMAIL=admin@example.com
+SMTP_USE_TLS=true
+```
+
+Example request:
+
+```json
+{
+  "full_name": "Test Candidate",
+  "email": "candidate@example.com",
+  "interview_date": "2026-06-25",
+  "interview_time": "14:30",
+  "notify_candidate": false
+}
+```
+
+If SMTP delivery fails, the booking remains saved and the response reports
+the failure through `email_status` and `email_error`.

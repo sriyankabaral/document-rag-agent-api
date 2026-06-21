@@ -8,3 +8,7 @@ langchain-text-splitters
 sentence-transformers
 qdrant-client
 requests
+email-validator
+langgraph
+langchain-ollama
+redis

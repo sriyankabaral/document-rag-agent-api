@@ -1,9 +1,8 @@
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
-from app.services.embedding_service import generate_embeddings
-from app.services.llm_service import generate_answer_with_ollama
-from app.services.qdrant_service import search_similar_chunks
+from app.services.agent_service import AgentExecutionError, run_agent
+from app.services.redis_memory import ConversationMemoryError
 
 
 router = APIRouter(prefix="/agent", tags=["Agent"])
@@ -11,9 +10,32 @@ router = APIRouter(prefix="/agent", tags=["Agent"])
 
 class AgentQueryRequest(BaseModel):
     query: str
+    session_id: str | None = None
+    conversation_id: str | None = None
     top_k: int = 5
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     llm_model: str = "llama3.2"
+
+    @model_validator(mode="after")
+    def validate_conversation_identifier(self):
+        session_id = (self.session_id or "").strip()
+        conversation_id = (self.conversation_id or "").strip()
+
+        if not session_id and not conversation_id:
+            raise ValueError("session_id or conversation_id is required.")
+
+        if session_id and conversation_id and session_id != conversation_id:
+            raise ValueError(
+                "session_id and conversation_id must match when both are set."
+            )
+
+        resolved_id = session_id or conversation_id
+        if len(resolved_id) > 200:
+            raise ValueError("The conversation identifier is too long.")
+
+        self.session_id = resolved_id
+        self.conversation_id = resolved_id
+        return self
 
 
 @router.post("/query")
@@ -33,83 +55,31 @@ def query_agent(request: AgentQueryRequest):
         )
 
     try:
-        query_embedding = generate_embeddings(
-            [query],
-            request.embedding_model,
-        )[0]
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate the query embedding.",
-        ) from exc
-
-    try:
-        search_results = search_similar_chunks(
-            query_embedding=query_embedding,
-            top_k=request.top_k,
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
-        ) from exc
-
-    retrieved_results = [
-        result for result in search_results if result.get("chunk_text")
-    ]
-
-    if not retrieved_results:
-        return {
-            "query": query,
-            "answer": "No relevant context was found.",
-            "llm_model": request.llm_model,
-            "embedding_model": request.embedding_model,
-            "retrieved_context_count": 0,
-            "sources": [],
-        }
-
-    context_chunks = [
-        result["chunk_text"] for result in retrieved_results
-    ]
-
-    try:
-        answer = generate_answer_with_ollama(
+        result = run_agent(
             query=query,
-            context_chunks=context_chunks,
-            model_name=request.llm_model,
+            session_id=request.session_id,
+            top_k=request.top_k,
+            embedding_model=request.embedding_model,
+            llm_model=request.llm_model,
         )
-    except ValueError as exc:
+    except ConversationMemoryError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except AgentExecutionError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         ) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate an answer with Ollama.",
-        ) from exc
-
-    sources = [
-        {
-            "original_filename": result["original_filename"],
-            "chunk_index": result["chunk_index"],
-            "score": result["score"],
-            "chunking_method": result["chunking_method"],
-            "embedding_model": result["embedding_model"],
-        }
-        for result in retrieved_results
-    ]
 
     return {
         "query": query,
-        "answer": answer,
+        "session_id": request.session_id,
+        "answer": result.answer,
         "llm_model": request.llm_model,
         "embedding_model": request.embedding_model,
-        "retrieved_context_count": len(retrieved_results),
-        "sources": sources,
+        "retrieved_context_count": result.retrieved_context_count,
+        "sources": result.sources,
+        "booking": result.booking,
     }

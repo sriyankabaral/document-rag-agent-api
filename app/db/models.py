@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, Date, DateTime, Integer, String, Text, Time
 
 from app.db.database import Base
 
@@ -28,6 +28,12 @@ class InterviewBooking(Base):
     id = Column(Integer, primary_key=True)
     full_name = Column(String, nullable=False)
     email = Column(String, nullable=False)
-    preferred_date = Column(String, nullable=False)
-    preferred_time = Column(String, nullable=False)
+    interview_date = Column(Date, nullable=False)
+    interview_time = Column(Time, nullable=False)
+    notify_candidate = Column(Boolean, default=False, nullable=False)
+    admin_email = Column(String, nullable=True)
+    email_sent_admin = Column(Boolean, default=False, nullable=False)
+    email_sent_candidate = Column(Boolean, default=False, nullable=False)
+    email_status = Column(String, default="pending", nullable=False)
+    email_error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
