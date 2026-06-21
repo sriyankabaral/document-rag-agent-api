@@ -15,14 +15,17 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.services.llm_service import OLLAMA_BASE_URL
+from app.services.intent_router import (
+    AgentIntent,
+    acknowledge_personal_information,
+    answer_memory_question,
+    classify_agent_intent,
+)
 from app.services.redis_memory import (
     load_conversation,
     save_conversation_turn,
 )
 from app.tools.agent_tools import book_interview_tool, search_document_chunks
-
-
-AGENT_TOOLS = [search_document_chunks, book_interview_tool]
 
 
 class AgentState(MessagesState):
@@ -42,37 +45,57 @@ class AgentExecutionError(Exception):
     pass
 
 
-def _system_prompt(top_k: int, embedding_model: str) -> str:
+def _system_prompt(
+    intent: AgentIntent,
+    top_k: int,
+    embedding_model: str,
+) -> str:
     return f"""
 You are a document RAG and interview-booking assistant.
 
-For questions about uploaded documents, always call search_document_chunks
-before answering. Use only retrieved document content, and say the uploaded
-documents do not contain enough information when retrieval has no answer.
-Use top_k={top_k} and embedding_model={embedding_model} for retrieval.
+The current request has already been routed as: {intent.value}.
+
+Use Redis conversation history for user-specific context. Never use document
+retrieval for personal memory questions. Use the retrieval tool only for
+questions about uploaded documents, resumes, policies, regulations, files,
+or knowledge-base content. For document retrieval, use top_k={top_k} and
+embedding_model={embedding_model}. Answer only from retrieved content.
 
 For interview booking, collect and confirm full_name, email, interview_date,
 and interview_time. Ask a concise follow-up for any missing required value.
 Do not ask whether the candidate should receive an email; backend settings
-control that behavior. Call book_interview_tool only after all required
-values are known. Never claim a booking succeeded unless the tool confirms it.
+control that behavior. Do not ask for interview date or time unless the user
+is explicitly trying to book or schedule an interview. Call the booking tool
+only for explicit booking intent and only after all required values are known.
+Never claim a booking succeeded unless the tool confirms it.
 
 Keep responses clear and concise.
 """.strip()
 
 
-@lru_cache(maxsize=4)
-def _build_agent_graph(model_name: str):
-    model = ChatOllama(
+def _tools_for_intent(intent: AgentIntent):
+    if intent == AgentIntent.DOCUMENT:
+        return [search_document_chunks]
+    if intent == AgentIntent.BOOKING:
+        return [book_interview_tool]
+    return []
+
+
+@lru_cache(maxsize=12)
+def _build_agent_graph(model_name: str, intent: AgentIntent):
+    tools = _tools_for_intent(intent)
+    base_model = ChatOllama(
         model=model_name,
         base_url=OLLAMA_BASE_URL,
         temperature=0.2,
         client_kwargs={"timeout": 120},
-    ).bind_tools(AGENT_TOOLS)
+    )
+    model = base_model.bind_tools(tools) if tools else base_model
 
     def call_model(state: AgentState):
         prompt = SystemMessage(
             content=_system_prompt(
+                intent=intent,
                 top_k=state["top_k"],
                 embedding_model=state["embedding_model"],
             )
@@ -82,14 +105,17 @@ def _build_agent_graph(model_name: str):
 
     workflow = StateGraph(AgentState)
     workflow.add_node("agent", call_model)
-    workflow.add_node("tools", ToolNode(AGENT_TOOLS))
     workflow.add_edge(START, "agent")
-    workflow.add_conditional_edges(
-        "agent",
-        tools_condition,
-        {"tools": "tools", END: END},
-    )
-    workflow.add_edge("tools", "agent")
+    if tools:
+        workflow.add_node("tools", ToolNode(tools))
+        workflow.add_conditional_edges(
+            "agent",
+            tools_condition,
+            {"tools": "tools", END: END},
+        )
+        workflow.add_edge("tools", "agent")
+    else:
+        workflow.add_edge("agent", END)
     return workflow.compile()
 
 
@@ -138,8 +164,20 @@ def run_agent(
     llm_model: str,
 ) -> AgentResult:
     history = load_conversation(session_id)
+    intent = classify_agent_intent(query, history)
+
+    if intent == AgentIntent.MEMORY:
+        answer = answer_memory_question(query, history)
+        save_conversation_turn(session_id, query, answer)
+        return AgentResult(answer=answer)
+
+    if intent == AgentIntent.PERSONAL_INFO:
+        answer = acknowledge_personal_information(query, history)
+        save_conversation_turn(session_id, query, answer)
+        return AgentResult(answer=answer)
+
     input_messages = [*history, HumanMessage(content=query)]
-    graph = _build_agent_graph(llm_model)
+    graph = _build_agent_graph(llm_model, intent)
 
     try:
         graph_result = graph.invoke(
