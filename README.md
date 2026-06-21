@@ -286,3 +286,74 @@ reports/FINDINGS.md
 The included evaluation retrieved the expected document in all 32 tests. See
 the report for latency comparisons and why the small dataset does not support
 a universal winning configuration.
+
+## Example Run Screenshots
+
+### Document Upload and Vector Storage
+
+The upload example uses `POST /documents/upload` with recursive chunking and
+the MiniLM embedding model. The HTTP 200 response confirms text extraction,
+chunk creation, embedding generation, Qdrant vector storage, and SQLite
+metadata persistence.
+
+![Document upload request and response](screenshots/01_document_upload.png)
+
+### Redis Conversational Memory
+
+The first request provides the user's name under the session identifier
+`one_last_test`.
+
+![Store user information in memory](screenshots/02a_memory_store_request.png)
+
+The response acknowledges the information without document retrieval or
+booking activity.
+
+![Memory storage response](screenshots/02b_memory_store_response.png)
+
+The follow-up request asks for the user's name while reusing the same session
+identifier.
+
+![Recall information from memory](screenshots/02c_memory_recall_request.png)
+
+The response recalls the name from Redis with no Qdrant sources and no
+booking result.
+
+![Memory recall response](screenshots/02d_memory_recall_response.png)
+
+### Interview Booking and Email Confirmation
+
+The agent receives the candidate's booking details and calls the centralized
+booking service. Candidate notification is enabled through the backend
+configuration for this example.
+
+![Agent interview booking request](screenshots/03a_booking_request.png)
+
+After the booking is saved, the SMTP service sends the candidate confirmation
+email with the selected interview date and time. Personal email information
+has been replaced with a safe example address.
+
+![Interview booking confirmation email](screenshots/03b_booking_email_confirmation.png)
+
+## Known Limitations and Production Improvements
+
+This project was built as a take-home backend assignment. The core
+functionality is complete, but production deployment would require additional
+hardening:
+
+- **Authentication and authorization:** Protected endpoints should use API
+  keys, OAuth2, JWT, or another appropriate authentication mechanism.
+- **Session ownership:** Client-provided `session_id` values should be tied to
+  authenticated users to prevent access to another user's Redis memory.
+- **Rate limiting:** `/agent/query`, `/documents/upload`, and
+  `/book-interview` should be rate-limited to reduce abuse and LLM load.
+- **File upload limits:** Maximum file sizes should be enforced before
+  processing to control memory, disk, and compute usage.
+- **Model allow-listing:** `llm_model` should be restricted to approved local
+  models instead of accepting arbitrary client-provided model names.
+- **Secrets management:** SMTP credentials and other secrets must remain in
+  environment variables and must never be committed to Git.
+- **Evaluation scale:** The current evaluation uses two documents and four
+  fixed questions. Strong benchmark claims require a larger labeled dataset.
+- **Automated tests:** The main flows were manually verified and syntax
+  checked. Production development should add unit and integration tests for
+  upload, retrieval, Redis memory, booking, and SMTP failure handling.
