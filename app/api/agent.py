@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, model_validator
 
+from app.config import DEFAULT_EMBEDDING_MODEL
 from app.services.agent_service import AgentExecutionError, run_agent
 from app.services.redis_memory import ConversationMemoryError
 
@@ -13,7 +14,7 @@ class AgentQueryRequest(BaseModel):
     session_id: str | None = None
     conversation_id: str | None = None
     top_k: int = 5
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_model: str = DEFAULT_EMBEDDING_MODEL
     llm_model: str = "llama3.2"
 
     @model_validator(mode="after")

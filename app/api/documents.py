@@ -14,6 +14,7 @@ from fastapi import (
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.config import DEFAULT_CHUNKING_METHOD, DEFAULT_EMBEDDING_MODEL
 from app.db.database import get_db
 from app.db.models import DocumentMetadata
 from app.services.chunker import chunk_text
@@ -38,16 +39,14 @@ ALLOWED_FILE_TYPES = {".pdf", ".txt"}
 class DocumentSearchRequest(BaseModel):
     query: str
     top_k: int = 5
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_model: str = DEFAULT_EMBEDDING_MODEL
 
 
 @router.post("/upload")
 def upload_document(
     file: UploadFile = File(...),
-    chunking_method: str = Form("recursive"),
-    embedding_model: str = Form(
-        "sentence-transformers/all-MiniLM-L6-v2"
-    ),
+    chunking_method: str = Form(DEFAULT_CHUNKING_METHOD),
+    embedding_model: str = Form(DEFAULT_EMBEDDING_MODEL),
     db: Session = Depends(get_db),
 ):
     try:
@@ -138,26 +137,6 @@ def upload_document(
         round(float(value), 4) for value in embeddings[0][:5]
     ]
 
-    try:
-        qdrant_point_ids = store_chunks_in_qdrant(
-            chunks=chunks,
-            embeddings=embeddings,
-            original_filename=original_filename,
-            saved_filename=saved_filename,
-            file_type=file_type,
-            chunking_method=chunking_method,
-            embedding_model=embedding_model,
-        )
-    except Exception as exc:
-        saved_path.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=(
-                "Failed to store document chunks in Qdrant. "
-                "Make sure Qdrant is running."
-            ),
-        ) from exc
-
     document_metadata = DocumentMetadata(
         file_name=original_filename,
         file_type=file_type,
@@ -169,6 +148,38 @@ def upload_document(
 
     try:
         db.add(document_metadata)
+        db.flush()
+    except Exception as exc:
+        db.rollback()
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Document metadata could not be prepared for saving.",
+        ) from exc
+
+    try:
+        qdrant_point_ids = store_chunks_in_qdrant(
+            chunks=chunks,
+            embeddings=embeddings,
+            original_filename=original_filename,
+            saved_filename=saved_filename,
+            file_type=file_type,
+            chunking_method=chunking_method,
+            embedding_model=embedding_model,
+            document_id=document_metadata.id,
+        )
+    except Exception as exc:
+        db.rollback()
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "Failed to store document chunks in Qdrant. "
+                "Make sure Qdrant is running."
+            ),
+        ) from exc
+
+    try:
         db.commit()
         db.refresh(document_metadata)
     except Exception as exc:
@@ -237,6 +248,7 @@ def search_documents(request: DocumentSearchRequest):
         qdrant_results = search_similar_chunks(
             query_embedding=query_embedding,
             top_k=request.top_k,
+            embedding_model=request.embedding_model,
         )
     except ValueError as exc:
         raise HTTPException(

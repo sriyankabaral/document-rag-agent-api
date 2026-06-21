@@ -3,7 +3,10 @@ import json
 from langchain_core.tools import tool
 from pydantic import ValidationError
 
-from app.config import AGENT_NOTIFY_CANDIDATE_BY_DEFAULT
+from app.config import (
+    AGENT_NOTIFY_CANDIDATE_BY_DEFAULT,
+    DEFAULT_EMBEDDING_MODEL,
+)
 from app.db.database import SessionLocal
 from app.schemas.booking import (
     InterviewBookingRequest,
@@ -21,7 +24,7 @@ from app.services.qdrant_service import search_similar_chunks
 def search_document_chunks(
     query: str,
     top_k: int = 5,
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+    embedding_model: str = DEFAULT_EMBEDDING_MODEL,
 ) -> str:
     """Search uploaded documents for chunks relevant to a user question."""
     try:
@@ -29,6 +32,7 @@ def search_document_chunks(
         results = search_similar_chunks(
             query_embedding=query_embedding,
             top_k=top_k,
+            embedding_model=embedding_model,
         )
     except Exception as exc:
         return json.dumps({"error": str(exc), "results": []})

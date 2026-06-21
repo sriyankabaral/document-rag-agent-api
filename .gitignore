@@ -42,3 +42,7 @@ app.db
 # Uploaded files
 uploads/*
 !uploads/.gitkeep
+
+# Local evaluation documents
+evaluation_data/*
+!evaluation_data/.gitkeep

@@ -2,15 +2,11 @@ from functools import lru_cache
 
 from sentence_transformers import SentenceTransformer
 
-
-SUPPORTED_EMBEDDING_MODELS = {
-    "sentence-transformers/all-MiniLM-L6-v2",
-    "BAAI/bge-small-en-v1.5",
-}
+from app.config import DEFAULT_EMBEDDING_MODEL, SUPPORTED_EMBEDDING_MODELS
 
 
 @lru_cache(maxsize=2)
-def get_embedding_model(model_name: str):
+def get_embedding_model(model_name: str = DEFAULT_EMBEDDING_MODEL):
     if model_name not in SUPPORTED_EMBEDDING_MODELS:
         raise ValueError(
             "Unsupported embedding model. Use "
@@ -23,7 +19,7 @@ def get_embedding_model(model_name: str):
 
 def generate_embeddings(
     texts: list[str],
-    model_name: str,
+    model_name: str = DEFAULT_EMBEDDING_MODEL,
 ) -> list[list[float]]:
     if not texts:
         return []
@@ -33,7 +29,9 @@ def generate_embeddings(
     return embeddings.tolist()
 
 
-def get_embedding_dimension(model_name: str) -> int:
+def get_embedding_dimension(
+    model_name: str = DEFAULT_EMBEDDING_MODEL,
+) -> int:
     model = get_embedding_model(model_name)
     dimension = model.get_sentence_embedding_dimension()
 

@@ -1,8 +1,11 @@
 import os
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
 
+
+load_dotenv()
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "document_chunks")
@@ -32,6 +35,7 @@ def store_chunks_in_qdrant(
     chunking_method: str,
     embedding_model: str,
     collection_name: str = COLLECTION_NAME,
+    document_id: int | None = None,
 ) -> list[str]:
     if not chunks or not embeddings:
         raise ValueError("Chunks and embeddings cannot be empty.")
@@ -46,24 +50,30 @@ def store_chunks_in_qdrant(
     ensure_collection(collection_name, vector_size)
 
     point_ids = [str(uuid4()) for _ in chunks]
-    points = [
-        models.PointStruct(
-            id=point_id,
-            vector=embedding,
-            payload={
-                "original_filename": original_filename,
-                "saved_filename": saved_filename,
-                "file_type": file_type,
-                "chunk_index": chunk_index,
-                "chunk_text": chunk,
-                "chunking_method": chunking_method,
-                "embedding_model": embedding_model,
-            },
+    points = []
+    for chunk_index, (point_id, chunk, embedding) in enumerate(
+        zip(point_ids, chunks, embeddings)
+    ):
+        payload = {
+            "file_name": original_filename,
+            "original_filename": original_filename,
+            "saved_filename": saved_filename,
+            "file_type": file_type,
+            "chunk_index": chunk_index,
+            "chunk_text": chunk,
+            "chunking_method": chunking_method,
+            "embedding_model": embedding_model,
+        }
+        if document_id is not None:
+            payload["document_id"] = document_id
+
+        points.append(
+            models.PointStruct(
+                id=point_id,
+                vector=embedding,
+                payload=payload,
+            )
         )
-        for chunk_index, (point_id, chunk, embedding) in enumerate(
-            zip(point_ids, chunks, embeddings)
-        )
-    ]
 
     qdrant_client.upsert(
         collection_name=collection_name,
@@ -77,6 +87,8 @@ def search_similar_chunks(
     query_embedding: list[float],
     collection_name: str = COLLECTION_NAME,
     top_k: int = 5,
+    exact: bool = False,
+    embedding_model: str | None = None,
 ) -> list[dict]:
     if not query_embedding:
         raise ValueError("Query embedding cannot be empty.")
@@ -92,6 +104,21 @@ def search_similar_chunks(
             query=query_embedding,
             limit=top_k,
             with_payload=True,
+            query_filter=(
+                models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="embedding_model",
+                            match=models.MatchValue(value=embedding_model),
+                        )
+                    ]
+                )
+                if embedding_model
+                else None
+            ),
+            search_params=(
+                models.SearchParams(exact=True) if exact else None
+            ),
         )
     except ValueError:
         raise
@@ -113,6 +140,7 @@ def search_similar_chunks(
                 "chunk_text": payload.get("chunk_text"),
                 "chunking_method": payload.get("chunking_method"),
                 "embedding_model": payload.get("embedding_model"),
+                "document_id": payload.get("document_id"),
             }
         )
 
